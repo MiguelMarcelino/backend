@@ -1,5 +1,4 @@
 services:
-  # Still need to import .db files and json folder (see Discord) manually.
   app-backend:
     image: stocknear/app-backend
     build: ./app
@@ -7,6 +6,7 @@ services:
       - 8000:8000
     depends_on:
       - redis
+
   fastify-backend:
     image: stocknear/fastify-backend
     build: ./fastify
@@ -14,17 +14,17 @@ services:
       - 2000:2000
     environment:
       - FMP_API_KEY=""
-      - MIXPANEL_API_KEY="" # If this is not set to a valid value the app will crash. You can comment out l. 25 and l. 58 in fastify/app.js to get it to work.
+      - MIXPANEL_API_KEY=""
       - TWITCH_API_KEY=""
       - TWITCH_SECRET_KEY=""
     depends_on:
       - pocketbase
+
   redis:
     image: redis:6.2-alpine
     ports:
       - '6379:6379'
-  # UNOFFICIAL IMAGE! To do it correctly either set up local instance or make own Dockerfile until official Docker Image is out.
-  # Still need to import schema.json manually. Is there an automated way?
+
   pocketbase:
     image: ghcr.io/muchobien/pocketbase:latest
     ports:
