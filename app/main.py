@@ -99,9 +99,21 @@ PRIORITY_STRATEGIES = {
 client = httpx.AsyncClient(http2=True, timeout=10.0)
 
 #================LLM Configuration====================#
-async_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+openai_api_key = os.getenv("OPENAI_API_KEY")
+async_client = None
 CHAT_MODEL = os.getenv("CHAT_MODEL")
-MAX_TOKENS = int(os.getenv("MAX_TOKENS"))
+MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))  # Default to 2000 if not set
+
+if openai_api_key:
+    try:
+        async_client = AsyncOpenAI(api_key=openai_api_key)
+        print("OpenAI client initialized successfully")
+    except Exception as e:
+        print(f"Warning: Failed to initialize OpenAI client: {e}")
+        async_client = None
+else:
+    print("Warning: OPENAI_API_KEY not found in environment variables. Chat features will be disabled.")
+
 with open("json/llm/instructions.json","rb") as file:
     INSTRUCTIONS = json_to_string(orjson.loads(file.read()))
 
@@ -4858,6 +4870,11 @@ async def generate_stream(messages: List):
 
 @app.post("/chat")
 async def get_data(data: ChatRequest, api_key: str = Security(get_api_key)):
+    if not async_client:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Chat service is currently unavailable. Please check if OPENAI_API_KEY is properly configured."}
+        )
     # Process the request and get messages for streaming
     try:
         messages = await process_request(data, async_client, function_map, request_semaphore, system_message, CHAT_MODEL, MAX_TOKENS, tools_payload)
