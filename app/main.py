@@ -172,7 +172,11 @@ def calculate_score(item: Dict, search_query: str) -> int:
 
 @contextmanager
 def db_connection(db_name):
-  conn = sqlite3.connect(f'{db_name}.db')
+  # Ensure the directory exists
+  os.makedirs('data/sqlite', exist_ok=True)
+  db_path = f'data/sqlite/{db_name}.db'
+  
+  conn = sqlite3.connect(db_path)
   cursor = conn.cursor()
   cursor.execute("PRAGMA journal_mode = wal")
   try:

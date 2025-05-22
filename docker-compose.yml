@@ -4,6 +4,8 @@ services:
     build: ./app
     ports:
       - 8000:8000
+    volumes:
+      - ./data/sqlite:/stocknear-backend/data/sqlite
     depends_on:
       - redis
 
