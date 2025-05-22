@@ -13,6 +13,7 @@ import numpy as np
 import zipfile
 import pandas as pd
 import orjson
+import json
 import aiohttp
 import aiofiles
 import redis
@@ -42,10 +43,37 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from functools import partial
 from datetime import datetime
-from utils.helper import load_latest_json
+from utils.helper import load_latest_json, json_to_string, process_request
 
 from openai import OpenAI, AsyncOpenAI
 from llm_functions import * # Your function implementations
+from contextlib import asynccontextmanager
+from functools import lru_cache
+from hashlib import md5
+
+
+
+
+
+# Connection pooling for API client
+@asynccontextmanager
+async def get_client_session():
+    # Create a session with connection pooling
+    session = aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(
+            limit=100,  # Max connections
+            limit_per_host=100,  # Max connections per host
+            keepalive_timeout=60  # Keep connections alive
+        )
+    )
+    try:
+        yield session
+    finally:
+        await session.close()
+@lru_cache(maxsize=100)
+def get_cached_response(query_hash: str) -> Dict[str, Any]:
+    return RESPONSE_CACHE.get(query_hash)
+
 
 
 # DB constants & context manager
@@ -74,15 +102,19 @@ client = httpx.AsyncClient(http2=True, timeout=10.0)
 async_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 CHAT_MODEL = os.getenv("CHAT_MODEL")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS"))
-INSTRUCTIONS = os.getenv("INSTRUCTIONS")
+with open("json/llm/instructions.json","rb") as file:
+    INSTRUCTIONS = json_to_string(orjson.loads(file.read()))
+
 function_definitions = get_function_definitions()
 function_map = {fn["name"]: globals()[fn["name"]] for fn in function_definitions}
+tools_payload = ([{"type": "function", "function": fn} for fn in function_definitions] if function_definitions else None)
 
 # Keep the system instruction separate
 system_message = {"role": "system", "content": INSTRUCTIONS}
-
+RESPONSE_CACHE = {}
+MAX_CONCURRENT_REQUESTS = 25  # Limit concurrent requests
+request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
 #======================================================#
-
 
 def calculate_score(item: Dict, search_query: str) -> int:
     name_lower = item['name'].lower()
@@ -408,6 +440,7 @@ class BulkList(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str
+    messages: list
 
 # Replace NaN values with None in the resulting JSON object
 def replace_nan_inf_with_none(obj):
@@ -4752,211 +4785,82 @@ async def compare_data_endpoint(data: CompareData, api_key: str = Security(get_a
 
 
 
-
-
-
-
-
-
-
-
-
-from contextlib import asynccontextmanager
-
-MAX_CONCURRENT_REQUESTS = 25  # Limit concurrent requests
-request_semaphore = asyncio.Semaphore(MAX_CONCURRENT_REQUESTS)
-
-# Connection pooling for API client
-@asynccontextmanager
-async def get_client_session():
-    # Create a session with connection pooling
-    session = aiohttp.ClientSession(
-        connector=aiohttp.TCPConnector(
-            limit=100,  # Max connections
-            limit_per_host=20,  # Max connections per host
-            keepalive_timeout=60  # Keep connections alive
-        )
-    )
-    try:
-        yield session
-    finally:
-        await session.close()
-
-# LRU Cache for storing common responses
-from functools import lru_cache
-from hashlib import md5
-
-@lru_cache(maxsize=100)
-def get_cached_response(query_hash: str) -> Dict[str, Any]:
-    return RESPONSE_CACHE.get(query_hash)
-
-# Global cache dictionary
-RESPONSE_CACHE = {}
-
 # Function to create a hash of the request for caching
 def create_query_hash(messages: List) -> str:
     # Create a deterministic hash of the messages
-    # Handle both dict messages and ChatCompletionMessage objects
+    # Use a more direct approach to extract message data
     message_dicts = []
     for msg in messages:
         if hasattr(msg, 'model_dump'):  # Handle Pydantic models like ChatCompletionMessage
             msg_dict = msg.model_dump()
-            if 'id' in msg_dict:
-                del msg_dict['id']
-            message_dicts.append(msg_dict)
         elif isinstance(msg, dict):  # Handle plain dictionaries
-            message_dicts.append({k: v for k, v in msg.items() if k != 'id'})
+            msg_dict = msg.copy()  # Use copy instead of dict comprehension
         else:  # Handle any other object by converting to a dict of its attributes
-            msg_dict = {k: getattr(msg, k) for k in dir(msg) 
+            msg_dict = {k: getattr(msg, k) for k in dir(msg)
                       if not k.startswith('_') and not callable(getattr(msg, k))}
-            if 'id' in msg_dict:
-                del msg_dict['id']
-            message_dicts.append(msg_dict)
+        
+        # Remove 'id' if it exists - do this after initial conversion to avoid redundant operations
+        msg_dict.pop('id', None)  # More efficient than checking and then deleting
+        message_dicts.append(msg_dict)
     
-    serialized = orjson.dumps(message_dicts)
+    serialized = orjson.dumps(message_dicts)  # orjson is already fast
     return md5(serialized).hexdigest()
+
 
 async def generate_stream(messages: List):
     try:
-        query_hash = create_query_hash(messages)
+        # Only calculate hash for non-tool messages to avoid unnecessary computation
+        has_tool_messages = any(
+            (isinstance(msg, dict) and msg.get('role') == "tool") or
+            (hasattr(msg, 'role') and msg.role == "tool")
+            for msg in messages
+        )
         
-        # Try to use cache first
-        cached = get_cached_response(query_hash)
-        if cached and not any(getattr(msg, 'role', None) == "tool" for msg in messages):
-            # Only use cache for non-tool calls
-            yield orjson.dumps(cached) + b"\n"
-            return
+        if not has_tool_messages:
+            query_hash = create_query_hash(messages)
+            # Try to use cache first
+            cached = get_cached_response(query_hash)
+            if cached:
+                yield orjson.dumps(cached) + b"\n"
+                return
         
         # Use semaphore to limit concurrent requests
         async with request_semaphore:
-            async with get_client_session() as session:
-                # Use the session with your client
-                stream = await async_client.chat.completions.create(
-                    model=CHAT_MODEL,
-                    messages=messages,
-                    max_tokens=MAX_TOKENS,
-                    stream=True
-                )
+            # Use the session with your client
+            stream = await async_client.chat.completions.create(
+                model=CHAT_MODEL,
+                messages=messages,
+                max_tokens=MAX_TOKENS,
+                stream=True
+            )
+            
+            full_content = ""
+            async for chunk in stream:
+                delta = chunk.choices[0].delta
+                if delta.content:
+                    full_content += delta.content
+                    payload = {
+                        "content": full_content
+                    }
+                    yield orjson.dumps(payload) + b"\n"
+            
+            # Update cache with full response if it's valuable to cache
+            if full_content and not has_tool_messages:
+                RESPONSE_CACHE[query_hash] = {"content": full_content}
                 
-                full_content = ""
-                async for chunk in stream:
-                    delta = chunk.choices[0].delta
-                    if delta.content:
-                        full_content += delta.content
-                        payload = {
-                            "content": full_content
-                        }
-                        yield orjson.dumps(payload) + b"\n"
-                
-                # Update cache with full response if it's valuable to cache
-                if len(full_content) > 0 and not any(getattr(msg, 'role', None) == "tool" for msg in messages):
-                    RESPONSE_CACHE[query_hash] = {"content": full_content}
-                    
     except Exception as e:
         print(f"Error in generate_stream: {str(e)}")
         yield orjson.dumps({"error": str(e)}) + b"\n"
 
-# Background task to process tool calls and generate final response
-async def process_request(data, tools_payload):
-    user_query = data.query
-    messages = [
-        system_message,
-        {"role": "user", "content": user_query}
-    ]
-    
-    # Process initial request and tool calls
-    try:
-        async with request_semaphore:
-            response = await async_client.chat.completions.create(
-                model=CHAT_MODEL,
-                messages=messages,
-                max_tokens=MAX_TOKENS,
-                tools=tools_payload,
-                tool_choice="auto" if tools_payload else "none"
-            )
-        
-        assistant_msg = response.choices[0].message
-        messages.append(assistant_msg)
-        
-        # Process tool calls with batching where possible
-        tool_call_futures = []
-        
-        while hasattr(assistant_msg, 'tool_calls') and assistant_msg.tool_calls:
-            # Gather all function calls to process in parallel
-            for call in assistant_msg.tool_calls:
-                fn_name = call.function.name
-                try:
-                    args = orjson.loads(call.function.arguments)
-                    if fn_name in function_map:
-                        # Schedule function execution
-                        future = asyncio.create_task(function_map[fn_name](**args))
-                        tool_call_futures.append((call.id, fn_name, future))
-                    else:
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": call.id,
-                            "name": fn_name,
-                            "content": orjson.dumps({"error": f"Unknown function {fn_name}"}).decode()
-                        })
-                except Exception as e:
-                    print(f"Error parsing arguments: {str(e)}")
-                    messages.append({
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "name": fn_name,
-                        "content": orjson.dumps({"error": "Invalid arguments"}).decode()
-                    })
-            
-            # Wait for all function calls to complete
-            for call_id, fn_name, future in tool_call_futures:
-                try:
-                    result = await future
-                    content = orjson.dumps(result).decode()
-                except Exception as e:
-                    print(f"Function {fn_name} error: {str(e)}")
-                    content = orjson.dumps({"error": str(e)}).decode()
-                
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": call_id,
-                    "name": fn_name,
-                    "content": content
-                })
-            
-            # Reset for next iteration
-            tool_call_futures = []
-            
-            # Get model response after processing tool calls
-            async with request_semaphore:
-                followup = await async_client.chat.completions.create(
-                    model=CHAT_MODEL,
-                    messages=messages,
-                    max_tokens=MAX_TOKENS,
-                    tools=tools_payload,
-                    tool_choice="auto"
-                )
-            
-            assistant_msg = followup.choices[0].message
-            messages.append(assistant_msg)
-        
-        # Return final messages for streaming
-        return messages
-        
-    except Exception as e:
-        print(f"Request processing failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+
+# Background task to process tool calls and generate final response with parallel execution                
+
 
 @app.post("/chat")
 async def get_data(data: ChatRequest, api_key: str = Security(get_api_key)):
-    # Package function definitions for the model
-    tools_payload = (
-        [{"type": "function", "function": fn} for fn in function_definitions]
-        if function_definitions else None
-    )
-    
     # Process the request and get messages for streaming
     try:
-        messages = await process_request(data, tools_payload)
+        messages = await process_request(data, async_client, function_map, request_semaphore, system_message, CHAT_MODEL, MAX_TOKENS, tools_payload)
         
         # Stream the final content
         return StreamingResponse(
@@ -4966,6 +4870,8 @@ async def get_data(data: ChatRequest, api_key: str = Security(get_api_key)):
     except Exception as e:
         print(f"Request failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
 
 
 @app.get("/newsletter")
