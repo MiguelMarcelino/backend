@@ -103,23 +103,33 @@ openai_api_key = os.getenv("OPENAI_API_KEY")
 async_client = None
 CHAT_MODEL = os.getenv("CHAT_MODEL")
 MAX_TOKENS = int(os.getenv("MAX_TOKENS", "2000"))  # Default to 2000 if not set
+INSTRUCTIONS = ""
+function_definitions = []
+function_map = {}
+tools_payload = None
 
+# Try to initialize OpenAI client if API key is available
 if openai_api_key:
     try:
         async_client = AsyncOpenAI(api_key=openai_api_key)
         print("OpenAI client initialized successfully")
+        
+        # Only try to load LLM-related files if OpenAI client is initialized
+        try:
+            with open("json/llm/instructions.json", "rb") as file:
+                INSTRUCTIONS = json_to_string(orjson.loads(file.read()))
+            function_definitions = get_function_definitions()
+            function_map = {fn["name"]: globals()[fn["name"]] for fn in function_definitions}
+            tools_payload = ([{"type": "function", "function": fn} for fn in function_definitions] if function_definitions else None)
+            print("LLM configuration loaded successfully")
+        except FileNotFoundError:
+            print("Warning: LLM configuration files not found. Chat features will have limited functionality.")
+        except Exception as e:
+            print(f"Warning: Failed to load LLM configuration: {e}")
     except Exception as e:
         print(f"Warning: Failed to initialize OpenAI client: {e}")
-        async_client = None
 else:
     print("Warning: OPENAI_API_KEY not found in environment variables. Chat features will be disabled.")
-
-with open("json/llm/instructions.json","rb") as file:
-    INSTRUCTIONS = json_to_string(orjson.loads(file.read()))
-
-function_definitions = get_function_definitions()
-function_map = {fn["name"]: globals()[fn["name"]] for fn in function_definitions}
-tools_payload = ([{"type": "function", "function": fn} for fn in function_definitions] if function_definitions else None)
 
 # Keep the system instruction separate
 system_message = {"role": "system", "content": INSTRUCTIONS}
@@ -4874,6 +4884,11 @@ async def get_data(data: ChatRequest, api_key: str = Security(get_api_key)):
         return JSONResponse(
             status_code=503,
             content={"error": "Chat service is currently unavailable. Please check if OPENAI_API_KEY is properly configured."}
+        )
+    if not INSTRUCTIONS or not function_definitions:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Chat service has limited functionality. LLM configuration files are missing."}
         )
     # Process the request and get messages for streaming
     try:
