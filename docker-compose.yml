@@ -6,10 +6,8 @@ services:
       - 8000:8000
     volumes:
       - ./data/sqlite:/stocknear-backend/data/sqlite
-    environment:
-      - FMP_API_KEY=${FMP_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - COINGECKO_API_KEY=${COINGECKO_API_KEY}
+    env_file:
+      - ./app/.env
     depends_on:
       - redis
 
@@ -18,11 +16,6 @@ services:
     build: ./fastify
     ports:
       - 2000:2000
-    environment:
-      - FMP_API_KEY=${FMP_API_KEY}
-      - MIXPANEL_API_KEY=${MIXPANEL_API_KEY}
-      - TWITCH_API_KEY=${TWITCH_API_KEY}
-      - TWITCH_SECRET_KEY=${TWITCH_SECRET_KEY}
     depends_on:
       - pocketbase
 

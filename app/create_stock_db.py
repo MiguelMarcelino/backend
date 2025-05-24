@@ -353,6 +353,8 @@ async def fetch_all_tickers(api_key: str):
     async with aiohttp.ClientSession() as session:
         async with session.get(url) as response:
             data = await response.json()
+            if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+                raise ValueError(f"Unexpected response format: {data}")
             return data
 
 async def fetch_pnk_tickers(api_key: str):

@@ -6,9 +6,6 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy .env file first (if it exists)
-COPY .env .env
-
 COPY . .
 
 # Create directories for databases
