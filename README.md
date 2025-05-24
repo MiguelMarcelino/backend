@@ -58,22 +58,15 @@ backend/
 
 Create a `.env` file in the `app` directory with this template:
 ```env
-# Financial Modeling Prep API Key
 FMP_API_KEY=your_fmp_key_here
-
-# OpenAI API Key
 OPENAI_API_KEY=your_openai_key_here
-
-# CoinGecko API Key
 COINGECKO_API_KEY=your_coingecko_key_here
-
-# Mixpanel API Key
 MIXPANEL_API_KEY=your_mixpanel_key_here
-
-# Twitch API Keys
 TWITCH_API_KEY=your_twitch_key_here
 TWITCH_SECRET_KEY=your_twitch_secret_here
 ```
+
+Important: Do not include any comments (lines starting with #) in your .env file as they can cause issues with the Docker build process.
 
 ## Running the Backend
 
@@ -84,6 +77,29 @@ docker compose -f frontend/docker-compose.yml up --build -d
 ```
 
 Note: The `.env` file is ignored by git for security reasons. Never commit your API keys to version control.
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Error: "export: #: bad variable name"**
+   - This error occurs when your .env file contains comment lines (starting with #)
+   - Solution: Remove all comments from your .env file and only keep the actual environment variable assignments
+   - Example of correct format:
+     ```env
+     FMP_API_KEY=your_key
+     OPENAI_API_KEY=your_key
+     ```
+   - Example of problematic format:
+     ```env
+     # API Keys
+     FMP_API_KEY=your_key
+     ```
+
+2. **Database Initialization Issues**
+   - Make sure all required API keys are properly set in your .env file
+   - Check that the .env file is placed in the correct location (app/.env)
+   - Ensure there are no spaces around the = sign in your environment variables
 
 # Contributing
 Stocknear is an open-source project, soley maintained by Muslem Rahimi.
