@@ -26,6 +26,42 @@ Built with:
 - [Pocketbase](https://pocketbase.io/): Database
 - [Redis](https://redis.io/): Caching Data
 
+# Environment Setup
+
+To run the backend, you'll need to set up environment variables in a `.env` file. Required API keys:
+
+- FMP API Key ([Financial Modeling Prep](https://financialmodelingprep.com/developer))
+- OpenAI API Key ([OpenAI Platform](https://platform.openai.com/api-keys))
+- CoinGecko API Key ([CoinGecko](https://www.coingecko.com/api/pricing))
+- Mixpanel API Key ([Mixpanel](https://mixpanel.com/))
+- Twitch API Keys ([Twitch Dev Console](https://dev.twitch.tv/console/apps))
+
+For detailed instructions on obtaining these API keys, see our [API Setup Guide](docs/API_SETUP.md).
+
+Create a `.env` file with this template:
+```env
+# Financial Modeling Prep API Key
+FMP_API_KEY=your_fmp_key_here
+
+# OpenAI API Key
+OPENAI_API_KEY=your_openai_key_here
+
+# CoinGecko API Key
+COINGECKO_API_KEY=your_coingecko_key_here
+
+# Mixpanel API Key
+MIXPANEL_API_KEY=your_mixpanel_key_here
+
+# Twitch API Keys
+TWITCH_API_KEY=your_twitch_key_here
+TWITCH_SECRET_KEY=your_twitch_secret_here
+```
+
+Run the backend with:
+```bash
+docker compose -f frontend/docker-compose.yml --env-file frontend/.env up --build -d
+```
+
 # Contributing
 Stocknear is an open-source project, soley maintained by Muslem Rahimi.
 

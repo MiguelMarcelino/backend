@@ -270,8 +270,9 @@ etf_set = set(etf_symbols)
 
 
 ### TECH DEBT ###
-con = sqlite3.connect('stocks.db')
-etf_con = sqlite3.connect('etf.db')
+con = sqlite3.connect('data/sqlite/stocks.db')
+etf_con = sqlite3.connect('data/sqlite/etf.db')
+crypto_con = sqlite3.connect('data/sqlite/crypto.db')
 
 load_dotenv()
 
