@@ -38,7 +38,25 @@ To run the backend, you'll need to set up environment variables in a `.env` file
 
 For detailed instructions on obtaining these API keys, see our [API Setup Guide](docs/API_SETUP.md).
 
-Create a `.env` file with this template:
+## Project Structure and Environment Configuration
+
+The backend consists of two main services: a FastAPI application (in the `app` directory) and a Fastify server (in the `fastify` directory). The environment variables need to be configured for the FastAPI service.
+
+Below is the basic structure of the backend repository:
+
+```
+backend/
+├── app/
+│   ├── Dockerfile
+│   ├── .env           <- Place your .env file here
+│   └── ...
+├── fastify/
+│   ├── Dockerfile
+│   └── ...
+└── docker-compose.yml
+```
+
+Create a `.env` file in the `app` directory with this template:
 ```env
 # Financial Modeling Prep API Key
 FMP_API_KEY=your_fmp_key_here
@@ -57,10 +75,15 @@ TWITCH_API_KEY=your_twitch_key_here
 TWITCH_SECRET_KEY=your_twitch_secret_here
 ```
 
-Run the backend with:
+## Running the Backend
+
+Once you have set up your environment file, you can start the backend services using Docker Compose:
+
 ```bash
-docker compose -f frontend/docker-compose.yml --env-file frontend/.env up --build -d
+docker compose -f frontend/docker-compose.yml up --build -d
 ```
+
+Note: The `.env` file is ignored by git for security reasons. Never commit your API keys to version control.
 
 # Contributing
 Stocknear is an open-source project, soley maintained by Muslem Rahimi.

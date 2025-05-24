@@ -6,14 +6,15 @@ COPY requirements.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy .env file first (if it exists)
+COPY .env .env
+
 COPY . .
 
 # Create directories for databases
 RUN mkdir -p data/sqlite backup_db
 
 # Initialize databases with proper error handling
-COPY .env .
-
 RUN set -e; \
     if [ -f .env ]; then \
         export $(cat .env | xargs); \
